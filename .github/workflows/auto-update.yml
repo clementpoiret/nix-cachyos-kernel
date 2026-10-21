@@ -223,14 +223,27 @@ jobs:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: cachix push --compression-level 16 "$CACHIX_CACHE" < "$RUNNER_TEMP/zfs-paths"
 
+      # Only checks that the kernel modules NixOS loads (open and proprietary) still build, so a
+      # kernel that breaks NVIDIA gets noticed. Not pushed: they are unfree, and users build
+      # them in minutes. Like ZFS, failures don't block the release.
+      - name: Check NVIDIA modules
+        id: nvidia
+        continue-on-error: true
+        run: |
+          nvidia=".#legacyPackages.x86_64-linux.linuxPackages-${KERNEL#linux-}.nvidiaPackages"
+          nix build --no-link --keep-going \
+            "$nvidia.latest.open" "$nvidia.latest.mod" "$nvidia.stable.open" "$nvidia.stable.mod"
+
       - name: Summary
         if: always()
         env:
           ZFS_OUTCOME: ${{ steps.zfs.outcome }}
+          NVIDIA_OUTCOME: ${{ steps.nvidia.outcome }}
         run: |
           {
             echo "### $KERNEL"
             echo "ZFS module: $ZFS_OUTCOME"
+            echo "NVIDIA modules (latest and stable, open and proprietary): $NVIDIA_OUTCOME"
             echo '```'
             cat "$RUNNER_TEMP/kernel-paths" "$RUNNER_TEMP/zfs-paths" 2>/dev/null | xargs -r nix path-info --size --human-readable
             echo '```'

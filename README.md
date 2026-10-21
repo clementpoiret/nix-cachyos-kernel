@@ -201,7 +201,7 @@ The cache lives on a free Cachix plan, so only these packages are cached, from t
 - `linux-cachyos-latest-lto-zen4`, for AMD Zen 4 and Zen 5
 - their ZFS modules (`zfs_cachyos` in the matching `linuxPackages-cachyos-*`)
 
-Other variants are built locally. If you were going to use an `-x86_64-v2` or `-x86_64-v4` kernel, use the cached generic or `-x86_64-v3` one instead: the kernel is compiled with SIMD disabled, so x86-64-v4 (which only adds AVX-512) produces the same code as x86-64-v3, and x86-64-v2 adds almost nothing over generic (the kernel already switches to POPCNT at boot when the CPU has it). Out-of-tree modules such as NVIDIA or VirtualBox are always built locally, against the cached kernel's `dev` output.
+Other variants are built locally. If you were going to use an `-x86_64-v2` or `-x86_64-v4` kernel, use the cached generic or `-x86_64-v3` one instead: the kernel is compiled with SIMD disabled, so x86-64-v4 (which only adds AVX-512) produces the same code as x86-64-v3, and x86-64-v2 adds almost nothing over generic (the kernel already switches to POPCNT at boot when the CPU has it). Out-of-tree modules such as NVIDIA or VirtualBox are always built locally, against the cached kernel's `dev` output. CI checks that nixpkgs' `latest` and `stable` NVIDIA drivers, open and proprietary modules, build against every cached kernel.
 
 **Important:** As with all binary caches, after adding binary cache to your NixOS configuration, please apply your settings once before enabling CachyOS kernel, so that the binary cache settings can take effect.
 

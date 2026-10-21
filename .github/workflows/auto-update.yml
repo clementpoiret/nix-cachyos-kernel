@@ -3,12 +3,14 @@ on:
   workflow_dispatch:
     inputs:
       update-flake-inputs:
-        description: 'Also update flake inputs (nixpkgs, flake-parts, ...)'
+        description: 'Update flake inputs (nixpkgs, flake-parts, ...) even without a new kernel'
         type: boolean
         default: false
   schedule:
-    # Check for new CachyOS releases daily. Flake inputs are only updated on Mondays,
-    # because every nixpkgs update rebuilds all kernels and fills the Cachix cache.
+    # Check for new CachyOS releases daily. A nixpkgs update rebuilds every kernel when it
+    # changes their toolchain (6 of 33 daily updates in Sep-Oct 2026), so flake inputs are
+    # updated along with a new linux-cachyos release, whose kernels rebuild anyway, or once
+    # the locked nixpkgs is a week old. See the commit job.
     - cron: '37 17 * * *'
 
 # Each job requests the permissions it needs
@@ -44,16 +46,6 @@ jobs:
           # Read-only token, avoids GitHub API rate limits
           github_access_token: ${{ github.token }}
 
-      - name: Update flake inputs
-        env:
-          FORCE_UPDATE: ${{ inputs.update-flake-inputs }}
-        run: |
-          if [ "$FORCE_UPDATE" = true ] || { [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$(date -u +%u)" = 1 ]; }; then
-            nix flake update
-          else
-            echo "Skipped, flake inputs are updated on Mondays"
-          fi
-
       - name: Update CachyOS versions
         run: nix run .#update-cachyos
 
@@ -62,7 +54,6 @@ jobs:
         with:
           name: update
           path: |
-            flake.lock
             kernel-cachyos/version.json
             zfs-cachyos/version.json
           if-no-files-found: error
@@ -87,6 +78,43 @@ jobs:
 
       - name: Validate update
         run: python3 -I validate_update.py "$RUNNER_TEMP/update" | tee "$RUNNER_TEMP/changes.txt"
+
+      # Update flake inputs here rather than in the update job: a flake.lock coming from the
+      # job that runs PKGBUILDs could pin any commit GitHub serves as NixOS/nixpkgs, forks included.
+      - name: Decide whether to update flake inputs
+        id: inputs
+        env:
+          FORCE_UPDATE: ${{ inputs.update-flake-inputs }}
+        run: |
+          version() { python3 -I -c 'import json, sys; print(json.load(sys.stdin)["linux-cachyos"]["version"])'; }
+          old=$(git show HEAD:kernel-cachyos/version.json | version)
+          new=$(version < kernel-cachyos/version.json)
+          locked=$(python3 -I -c 'import json; print(json.load(open("flake.lock"))["nodes"]["nixpkgs"]["locked"]["lastModified"])')
+          age=$(( ($(date +%s) - locked) / 86400 ))
+          echo "linux-cachyos: $old -> $new, locked nixpkgs is $age days old"
+          if [ "$FORCE_UPDATE" = true ] || [ "$old" != "$new" ] || [ "$age" -ge 7 ]; then
+            echo "update=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install nix
+        if: steps.inputs.outputs.update == 'true'
+        uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+        with:
+          github_access_token: ${{ github.token }}
+
+      - name: Update flake inputs
+        if: steps.inputs.outputs.update == 'true'
+        run: |
+          nix flake update
+          git show HEAD:flake.lock > "$RUNNER_TEMP/flake.lock.old"
+          python3 -I - "$RUNNER_TEMP/flake.lock.old" flake.lock <<'EOF' | tee -a "$RUNNER_TEMP/changes.txt"
+          import json, sys
+          old, new = (json.load(open(path))["nodes"] for path in sys.argv[1:])
+          for name, node in sorted(new.items()):
+              rev, previous = node.get("locked", {}).get("rev"), old.get(name, {}).get("locked", {}).get("rev")
+              if rev != previous:
+                  print(f"{name}: {(previous or '')[:12]} -> {(rev or '')[:12]}")
+          EOF
 
       - name: Commit and push
         id: commit
@@ -195,14 +223,27 @@ jobs:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: cachix push --compression-level 16 "$CACHIX_CACHE" < "$RUNNER_TEMP/zfs-paths"
 
+      # Only checks that the kernel modules NixOS loads (open and proprietary) still build, so a
+      # kernel that breaks NVIDIA gets noticed. Not pushed: they are unfree, and users build
+      # them in minutes. Like ZFS, failures don't block the release.
+      - name: Check NVIDIA modules
+        id: nvidia
+        continue-on-error: true
+        run: |
+          nvidia=".#legacyPackages.x86_64-linux.linuxPackages-${KERNEL#linux-}.nvidiaPackages"
+          nix build --no-link --keep-going \
+            "$nvidia.latest.open" "$nvidia.latest.mod" "$nvidia.stable.open" "$nvidia.stable.mod"
+
       - name: Summary
         if: always()
         env:
           ZFS_OUTCOME: ${{ steps.zfs.outcome }}
+          NVIDIA_OUTCOME: ${{ steps.nvidia.outcome }}
         run: |
           {
             echo "### $KERNEL"
             echo "ZFS module: $ZFS_OUTCOME"
+            echo "NVIDIA modules (latest and stable, open and proprietary): $NVIDIA_OUTCOME"
             echo '```'
             cat "$RUNNER_TEMP/kernel-paths" "$RUNNER_TEMP/zfs-paths" 2>/dev/null | xargs -r nix path-info --size --human-readable
             echo '```'

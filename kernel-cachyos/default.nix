@@ -10,10 +10,9 @@ let
 
   # FIXME: remove this patch when no longer applicable
   # https://github.com/CachyOS/linux-cachyos/issues/1031
-  ltsPatch = fetchurl {
-    url = "https://github.com/user-attachments/files/32050144/0001-revert-drm-gud-validate-TV-mode-names-before-creating-enum-property.patch";
-    hash = "sha256-hBw+vsSix/eQIPS26qT7YTe6W2rdqw2eF2Q3sJfksa4=";
-  };
+  # Vendored from https://github.com/user-attachments/files/32050144/0001-revert-drm-gud-validate-TV-mode-names-before-creating-enum-property.patch
+  # (sha256-hBw+vsSix/eQIPS26qT7YTe6W2rdqw2eF2Q3sJfksa4=)
+  ltsPatch = ./patches/0001-revert-drm-gud-validate-TV-mode-names-before-creating-enum-property.patch;
 
   linuxSources = lib.mapAttrs (_: v: {
     inherit (v) version;

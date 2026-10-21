@@ -1,5 +1,6 @@
 import functools
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -11,6 +12,7 @@ REPO = "https://github.com/CachyOS/linux-cachyos.git"
 PATCHES_REPO = "https://github.com/CachyOS/kernel-patches.git"
 ZFS_META_URL = "https://raw.githubusercontent.com/CachyOS/zfs/{commit}/META"
 ZFS_ARCHIVE_URL = "https://github.com/CachyOS/zfs/archive/{commit}.tar.gz"
+SRCNAME_RE = re.compile(r"cachyos-[0-9]+\.[0-9]+(\.[0-9]+)?(-rc[0-9]+)?-[0-9]+")
 
 
 @functools.lru_cache(None)
@@ -74,15 +76,20 @@ def run_nix_prefetch_git_subfolder(url: str, rev: str, subfolder: str) -> str:
 
 
 def get_srcname(pkgbuild_text: str) -> str:
+    # The PKGBUILD is code from upstream, run it without access to our environment
     script = pkgbuild_text + "\necho $_srcname"
     result = subprocess.run(
-        ["bash"],
+        ["bash", "--noprofile", "--norc"],
         input=script,
         capture_output=True,
         text=True,
         check=True,
+        env={"PATH": os.environ.get("PATH", "")},
     )
-    return result.stdout.strip()
+    srcname = result.stdout.strip()
+    if not SRCNAME_RE.fullmatch(srcname):
+        raise ValueError(f"Unexpected _srcname in PKGBUILD: {srcname!r}")
+    return srcname
 
 
 def srcname_to_version(srcname: str) -> str:

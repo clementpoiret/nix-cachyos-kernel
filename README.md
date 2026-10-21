@@ -2,6 +2,8 @@
 
 This repo contains Linux kernels with both [CachyOS patches](https://github.com/CachyOS/kernel-patches) and [CachyOS tunings](https://github.com/CachyOS/linux-cachyos), as well as [CachyOS-patched ZFS module](https://github.com/CachyOS/zfs).
 
+It is an independently maintained fork of [xddxdd/nix-cachyos-kernel](https://github.com/xddxdd/nix-cachyos-kernel), with its own update automation and binary cache.
+
 ## Which kernel versions are provided?
 
 This repo provides the following kernel variants, consistent with the [upstream definitions](https://github.com/CachyOS/linux-cachyos?tab=readme-ov-file#kernel-variants--schedulers):
@@ -44,33 +46,35 @@ This repo provides the following kernel variants, consistent with the [upstream 
         ├───linux-cachyos-bore-lto-zen4
         # Additional CachyOS kernel variants
         ├───linux-cachyos-bmq
-        ├───linux-cachyos-bmq-lto (no binary cache)
+        ├───linux-cachyos-bmq-lto
         ├───linux-cachyos-deckify
-        ├───linux-cachyos-deckify-lto (no binary cache)
+        ├───linux-cachyos-deckify-lto
         ├───linux-cachyos-eevdf
-        ├───linux-cachyos-eevdf-lto (no binary cache)
+        ├───linux-cachyos-eevdf-lto
         ├───linux-cachyos-hardened
-        ├───linux-cachyos-hardened-lto (no binary cache)
+        ├───linux-cachyos-hardened-lto
         ├───linux-cachyos-rc
-        ├───linux-cachyos-rc-lto (no binary cache)
+        ├───linux-cachyos-rc-lto
         ├───linux-cachyos-rt-bore
-        ├───linux-cachyos-rt-bore-lto (no binary cache)
+        ├───linux-cachyos-rt-bore-lto
         ├───linux-cachyos-server
-        ├───linux-cachyos-server-lto (no binary cache)
+        ├───linux-cachyos-server-lto
         # ZFS module matching CachyOS kernels
         ├───zfs-cachyos
         ├───zfs-cachyos-lto
         ├───zfs-cachyos-lts
         ├───zfs-cachyos-lts-lto
         ├───zfs-cachyos-hardened
-        ├───zfs-cachyos-hardened-lto (no binary cache)
+        ├───zfs-cachyos-hardened-lto
         ├───zfs-cachyos-rc
-        └───zfs-cachyos-rc-lto (no binary cache)
+        └───zfs-cachyos-rc-lto
 ```
 
-The kernel versions are automatically kept in sync with upstream CachyOS releases via a daily GitHub Action (see [update.py](update.py)), so once CachyOS updates their kernels, this repo will automatically catch up.
+Only some of them are in the binary cache, see [Binary cache](#binary-cache).
 
-Use `nix flake show github:xddxdd/nix-cachyos-kernel/release` to see the current effective versions.
+The kernel versions are automatically kept in sync with upstream CachyOS releases via a daily GitHub Action (see [update.py](update.py)), so once CachyOS updates their kernels, this repo will automatically catch up. Flake inputs (nixpkgs) are updated weekly.
+
+Use `nix flake show github:clementpoiret/nix-cachyos-kernel/release` to see the current effective versions.
 
 The kernels ending in `-lto` have Clang+ThinLTO enabled.
 
@@ -88,20 +92,20 @@ Add the `release` branch of this repo to the inputs section of your `flake.nix`:
 ```nix
 {
   inputs = {
-    nix-cachyos-kernel.url = "github:xddxdd/nix-cachyos-kernel/release";
+    nix-cachyos-kernel.url = "github:clementpoiret/nix-cachyos-kernel/release";
     # Do not override its nixpkgs input, otherwise there can be mismatch between patches and kernel version
   }
 }
 ```
 
-The `release` branch contains the latest kernel that has been built by my [Hydra CI](https://hydra.lantian.pub/jobset/lantian/nix-cachyos-kernel) and is present in binary cache.
+The `release` branch only moves once [GitHub Actions](.github/workflows/auto-update.yml) has built every cached kernel and pushed it to the binary cache.
 
 > If you want the absolute latest version with or without binary cache, use the `master` branch (default branch) instead:
 >
 > ```nix
 > {
 >   inputs = {
->     nix-cachyos-kernel.url = "github:xddxdd/nix-cachyos-kernel";
+>     nix-cachyos-kernel.url = "github:clementpoiret/nix-cachyos-kernel";
 >   }
 > }
 > ```
@@ -151,6 +155,7 @@ Then specify `pkgs.cachyosKernels.linuxPackages-cachyos-latest` (or other varian
 > - You want to avoid initializing multiple instances of nixpkgs.
 > - You want to use latest kernel modules that are just merged/updated within nixpkgs.
 > - You want to customize `nixpkgs.config` options.
+> - You need a kernel module that nixpkgs marks as insecure (such as `broadcom_sta`). The `pinned` overlay refuses those, while `default` lets you allow them with `nixpkgs.config.permittedInsecurePackages`.
 
 #### Non-Flakes
 
@@ -159,7 +164,7 @@ This flake is usable in non-flakes nix configuration using npins and the followi
 Npins commands:
 ```bash
 npins init
-npins add github xddxdd nix-cachyos-kernel
+npins add github clementpoiret nix-cachyos-kernel -b release
 ```
 
 ```nix
@@ -180,35 +185,25 @@ but note that you will have to manually update the revision and hash to update y
 
 ### Binary cache
 
-The binary cache is automatically configured via [`nixConfig`](flake.nix:12-19) in this flake, so Nix will prompt you to accept it when you first use this repo.
-
-I'm running a Hydra CI to build the kernels and push them to my Attic binary cache. You can see the build status here: <https://hydra.lantian.pub/jobset/lantian/nix-cachyos-kernel>
-
-Due to build capacity limitations, LTO variants of the less used kernels (`bmq`, `deckify`, `eevdf`, `hardened`, `rc`, `rt-bore`, `server`) are not built.
-
-If you prefer to manually configure the binary cache (or are not using flakes), add the following config:
+Kernels are built by [GitHub Actions](.github/workflows/auto-update.yml) and pushed to the [`nixos-cachyos-kernels`](https://nixos-cachyos-kernels.cachix.org) Cachix cache. Running `nix` commands directly on this flake will prompt you to accept it through [`nixConfig`](flake.nix), but `nixConfig` is ignored when this flake is an input of your configuration, so add it to your NixOS configuration instead:
 
 ```nix
 {
-  nix.settings.substituters = [ "https://attic.xuyh0120.win/lantian" ];
-  nix.settings.trusted-public-keys = [ "lantian:EeAUQ+W+6r7EtwnmYjeVwx5kOGEBpjlBfPlzGlTNvHc=" ];
+  nix.settings.substituters = [ "https://nixos-cachyos-kernels.cachix.org" ];
+  nix.settings.trusted-public-keys = [ "nixos-cachyos-kernels.cachix.org-1:ccFqQ2GZOeTAPrZaDDsCY5Rk1Ndg/+NnM2s6UwIDTS0=" ];
 }
 ```
+
+The cache lives on a free Cachix plan, so only these packages are cached, from the `release` branch with the `pinned` overlay:
+
+- `linux-cachyos-latest`, `linux-cachyos-latest-lto`, `linux-cachyos-lts` and `linux-cachyos-bore`, for any x86-64 CPU
+- `linux-cachyos-latest-lto-x86_64-v3`, for x86-64-v3 CPUs (Intel Haswell and later, all AMD Zen)
+- `linux-cachyos-latest-lto-zen4`, for AMD Zen 4 and Zen 5
+- their ZFS modules (`zfs_cachyos` in the matching `linuxPackages-cachyos-*`)
+
+Other variants are built locally. If you were going to use an `-x86_64-v2` or `-x86_64-v4` kernel, use the cached generic or `-x86_64-v3` one instead: the kernel is compiled with SIMD disabled, so x86-64-v4 (which only adds AVX-512) produces the same code as x86-64-v3, and x86-64-v2 adds almost nothing over generic (the kernel already switches to POPCNT at boot when the CPU has it). Out-of-tree modules such as NVIDIA or VirtualBox are always built locally, against the cached kernel's `dev` output.
 
 **Important:** As with all binary caches, after adding binary cache to your NixOS configuration, please apply your settings once before enabling CachyOS kernel, so that the binary cache settings can take effect.
-
-#### Alternative binary cache
-
-> Disclaimer: I cannot guarantee the security or availability of these binary caches not maintained by me.
-
-[@bahrom04](https://github.com/bahrom04) is also providing CachyOS kernel builds mirrored from this repo. See [#89](https://github.com/xddxdd/nix-cachyos-kernel/issues/89) for details.
-
-```nix
-{
-  nix.settings.substituters = [ "https://cache.xinux.uz" ];
-  nix.settings.trusted-public-keys = [ "cache.xinux.uz:BXCrtqejFjWzWEB9YuGB7X2MV4ttBur1N8BkwQRdH+0=" ];
-}
-```
 
 ### Example configuration
 
@@ -224,8 +219,9 @@ If you prefer to manually configure the binary cache (or are not using flakes), 
             nixpkgs.overlays = [ nix-cachyos-kernel.overlays.pinned ];
             boot.kernelPackages = pkgs.cachyosKernels.linuxPackages-cachyos-latest;
 
-            # Binary cache is auto-configured via nixConfig in flake.nix,
-            # no additional binary cache config is needed.
+            # Binary cache, see "Binary cache" above
+            nix.settings.substituters = [ "https://nixos-cachyos-kernels.cachix.org" ];
+            nix.settings.trusted-public-keys = [ "nixos-cachyos-kernels.cachix.org-1:ccFqQ2GZOeTAPrZaDDsCY5Rk1Ndg/+NnM2s6UwIDTS0=" ];
 
             # ... your other configs
           }
@@ -314,7 +310,7 @@ If you want to construct your own `linuxPackages` attrset with `linuxKernel.pack
 }
 ```
 
-> If you are still running into issues, see [this comment](https://github.com/xddxdd/nix-cachyos-kernel/issues/67#issuecomment-4305704829) for a possible workaround.
+> If you are still running into issues, see [this comment](https://github.com/xddxdd/nix-cachyos-kernel/issues/67#issuecomment-4305704829) in the upstream repository for a possible workaround.
 
 ### Help! My ZFS module is failing to build!
 

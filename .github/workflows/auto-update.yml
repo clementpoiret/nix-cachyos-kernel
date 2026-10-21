@@ -1,19 +1,136 @@
-name: 'Auto update packages'
+name: 'Update and build kernels'
 on:
   workflow_dispatch:
+    inputs:
+      update-flake-inputs:
+        description: 'Also update flake inputs (nixpkgs, flake-parts, ...)'
+        type: boolean
+        default: false
   schedule:
+    # Check for new CachyOS releases daily. Flake inputs are only updated on Mondays,
+    # because every nixpkgs update rebuilds all kernels and fills the Cachix cache.
     - cron: '37 17 * * *'
-permissions:
-  actions: write
-  contents: write
+
+# Each job requests the permissions it needs
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CACHIX_CACHE: nixos-cachyos-kernels
+
 jobs:
-  auto-update:
+  update:
+    # update.py runs CachyOS PKGBUILDs, so this job gets no write access and no secrets.
+    # Its only output is an artifact, validated by the commit job.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install nix
+        uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+        with:
+          # Read-only token, avoids GitHub API rate limits
+          github_access_token: ${{ github.token }}
+
+      - name: Update flake inputs
+        env:
+          FORCE_UPDATE: ${{ inputs.update-flake-inputs }}
+        run: |
+          if [ "$FORCE_UPDATE" = true ] || { [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$(date -u +%u)" = 1 ]; }; then
+            nix flake update
+          else
+            echo "Skipped, flake inputs are updated on Mondays"
+          fi
+
+      - name: Update CachyOS versions
+        run: nix run .#update-cachyos
+
+      - name: Upload update
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: update
+          path: |
+            flake.lock
+            kernel-cachyos/version.json
+            zfs-cachyos/version.json
+          if-no-files-found: error
+          retention-days: 7
+
+  commit:
+    needs: update
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      rev: ${{ steps.commit.outputs.rev }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download update
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: update
+          path: ${{ runner.temp }}/update
+
+      - name: Validate update
+        run: python3 -I validate_update.py "$RUNNER_TEMP/update" | tee "$RUNNER_TEMP/changes.txt"
+
+      - name: Commit and push
+        id: commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add flake.lock kernel-cachyos/version.json zfs-cachyos/version.json
+          if git diff --cached --quiet; then
+            echo "No changes" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            { echo 'Auto update flake'; echo; cat "$RUNNER_TEMP/changes.txt"; } | git commit -F -
+            git push origin "HEAD:$GITHUB_REF_NAME"
+            { echo '```'; cat "$RUNNER_TEMP/changes.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "rev=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.kernel }})
+    needs: commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each kernel takes roughly 350-400 MB of the Cachix cache (out, modules and dev
+        # outputs), and older builds are evicted once the 5 GB free tier is full. Keep a
+        # full round under ~2.5 GB so the previous one stays available while this one builds.
+        #
+        # With the kernel's SIMD-disabled flags, x86_64-v4 compiles the same code as v3 and
+        # x86_64-v2 adds almost nothing over generic, so only generic, v3 and zen4 are cached.
+        kernel:
+          - linux-cachyos-latest
+          - linux-cachyos-latest-lto
+          - linux-cachyos-lts
+          - linux-cachyos-bore
+          - linux-cachyos-latest-lto-x86_64-v3
+          - linux-cachyos-latest-lto-zen4
     env:
-      GIT_SSL_NO_VERIFY: 'true'
+      KERNEL: ${{ matrix.kernel }}
     steps:
       - name: Maximize build space
-        uses: easimon/maximize-build-space@master
+        uses: easimon/maximize-build-space@fc881a613ad2a34aca9c9624518214ebc21dfc0c # v10
         with:
           root-reserve-mb: 8192
           temp-reserve-mb: 1024
@@ -26,51 +143,80 @@ jobs:
           remove-docker-images: 'true'
 
       - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up QEMU
-        id: qemu
-        uses: docker/setup-qemu-action@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          image: tonistiigi/binfmt:latest
-          platforms: all
+          ref: ${{ needs.commit.outputs.rev }}
+          persist-credentials: false
 
       - name: Install nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
         with:
-          nix_path: nixpkgs=channel:nixos-unstable
+          github_access_token: ${{ github.token }}
           extra_nix_config: |
-            experimental-features = nix-command flakes ca-derivations
-            extra-experimental-features = nix-command flakes ca-derivations
-            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
-            extra-platforms = i686-linux aarch64-linux arm-linux
-            log-lines = 25
+            build-dir = /nix/var/nix/builds
+            log-lines = 50
 
-      - name: Set nix daemon tmpdir path
-        run: |
-          sudo mkdir -p /nix/tmpdir
-          sudo chown "$(whoami)" /nix/tmpdir
-
-          cat > override.conf <<EOF
-          [Service]
-          Environment="TMPDIR=/nix/tmpdir"
-          EOF
-          sudo mkdir /etc/systemd/system/nix-daemon.service.d/
-          sudo mv override.conf /etc/systemd/system/nix-daemon.service.d/override.conf
-          sudo systemctl daemon-reload
-          sudo systemctl restart nix-daemon
-
-      - name: Build nix packages
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          export TMPDIR=/nix/tmpdir
-          nix flake update
-          nix run .#update-cachyos
-
-      - name: Commit back to repository
-        uses: stefanzweifel/git-auto-commit-action@v7
+      - name: Use Cachix cache
+        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
         with:
-          commit_message: 'Auto update flake'
-          commit_user_name: 'xddxdd-bot'
-          commit_user_email: 'xddxdd-bot@users.noreply.github.com'
+          name: ${{ env.CACHIX_CACHE }}
+          # Pull only, the auth token is only given to the push steps below
+          skipPush: true
+
+      - name: Build kernel
+        run: nix build --no-link --print-out-paths ".#$KERNEL^*" | tee "$RUNNER_TEMP/kernel-paths"
+
+      # Only push what users download: the kernel outputs and their runtime closure.
+      # Sources, configs and anything already on cache.nixos.org are skipped.
+      # zstd level 16 (cachix's maximum) makes the dev output ~23% smaller than the
+      # default level 2, for a few extra minutes of compression.
+      - name: Push kernel
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: cachix push --compression-level 16 "$CACHIX_CACHE" < "$RUNNER_TEMP/kernel-paths"
+
+      # ZFS failures (usually an unsupported kernel version) don't block the release
+      - name: Build ZFS module
+        id: zfs
+        continue-on-error: true
+        run: |
+          nix build --no-link --print-out-paths \
+            ".#legacyPackages.x86_64-linux.linuxPackages-${KERNEL#linux-}.zfs_cachyos" | tee "$RUNNER_TEMP/zfs-paths"
+
+      - name: Push ZFS module
+        if: steps.zfs.outcome == 'success'
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: cachix push --compression-level 16 "$CACHIX_CACHE" < "$RUNNER_TEMP/zfs-paths"
+
+      - name: Summary
+        if: always()
+        env:
+          ZFS_OUTCOME: ${{ steps.zfs.outcome }}
+        run: |
+          {
+            echo "### $KERNEL"
+            echo "ZFS module: $ZFS_OUTCOME"
+            echo '```'
+            cat "$RUNNER_TEMP/kernel-paths" "$RUNNER_TEMP/zfs-paths" 2>/dev/null | xargs -r nix path-info --size --human-readable
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    # Point the release branch at the commit whose kernels are all in the cache
+    needs: [commit, build]
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.commit.outputs.rev }}
+          fetch-depth: 0
+
+      - name: Fast-forward release branch
+        env:
+          REV: ${{ needs.commit.outputs.rev }}
+        run: git push origin "$REV:refs/heads/release"

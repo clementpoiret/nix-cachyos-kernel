@@ -72,7 +72,7 @@ This repo provides the following kernel variants, consistent with the [upstream 
 
 Only some of them are in the binary cache, see [Binary cache](#binary-cache).
 
-The kernel versions are automatically kept in sync with upstream CachyOS releases via a daily GitHub Action (see [update.py](update.py)), so once CachyOS updates their kernels, this repo will automatically catch up. Flake inputs (nixpkgs) are updated weekly.
+The kernel versions are automatically kept in sync with upstream CachyOS releases via a daily GitHub Action (see [update.py](update.py)), so once CachyOS updates their kernels, this repo will automatically catch up. Flake inputs (nixpkgs) are updated along with each new `linux-cachyos` release, or after a week without one.
 
 Use `nix flake show github:clementpoiret/nix-cachyos-kernel/release` to see the current effective versions.
 

@@ -250,7 +250,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   promote:
-    # Point the release branch at the commit whose kernels are all in the cache
+    # Publish the commit whose kernels are all in the cache on the release branch.
+    # GITHUB_TOKEN can't push a ref that adds or changes workflow files, so release holds
+    # snapshots of that commit without .github/, which builds the exact same kernels.
     needs: [commit, build]
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
@@ -261,9 +263,21 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.commit.outputs.rev }}
-          fetch-depth: 0
 
-      - name: Fast-forward release branch
+      - name: Publish release snapshot
         env:
           REV: ${{ needs.commit.outputs.rev }}
-        run: git push origin "$REV:refs/heads/release"
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          tree=$(git ls-tree "$REV" | awk -F '\t' '$2 != ".github"' | git mktree)
+          parent=()
+          if git fetch --depth=1 origin release; then
+            if [ "$(git rev-parse 'FETCH_HEAD^{tree}')" = "$tree" ]; then
+              echo "release already matches $REV"
+              exit 0
+            fi
+            parent=(-p FETCH_HEAD)
+          fi
+          snapshot=$(git commit-tree "$tree" "${parent[@]}" -m "Release $REV" -m "Snapshot of master at $REV, without .github/.")
+          git push origin "$snapshot:refs/heads/release"

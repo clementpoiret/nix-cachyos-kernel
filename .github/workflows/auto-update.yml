@@ -113,8 +113,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Each kernel takes roughly 400 MB of the Cachix cache (out, modules and dev outputs),
-        # and older builds are evicted once the 5 GB free tier is full.
+        # Each kernel takes roughly 350-400 MB of the Cachix cache (out, modules and dev
+        # outputs), and older builds are evicted once the 5 GB free tier is full.
         kernel:
           - linux-cachyos-latest
           - linux-cachyos-latest-lto
@@ -162,10 +162,12 @@ jobs:
 
       # Only push what users download: the kernel outputs and their runtime closure.
       # Sources, configs and anything already on cache.nixos.org are skipped.
+      # zstd level 16 (cachix's maximum) makes the dev output ~23% smaller than the
+      # default level 2, for a few extra minutes of compression.
       - name: Push kernel
         env:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        run: cachix push "$CACHIX_CACHE" < "$RUNNER_TEMP/kernel-paths"
+        run: cachix push --compression-level 16 "$CACHIX_CACHE" < "$RUNNER_TEMP/kernel-paths"
 
       # ZFS failures (usually an unsupported kernel version) don't block the release
       - name: Build ZFS module
@@ -179,7 +181,7 @@ jobs:
         if: steps.zfs.outcome == 'success'
         env:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        run: cachix push "$CACHIX_CACHE" < "$RUNNER_TEMP/zfs-paths"
+        run: cachix push --compression-level 16 "$CACHIX_CACHE" < "$RUNNER_TEMP/zfs-paths"
 
       - name: Summary
         if: always()

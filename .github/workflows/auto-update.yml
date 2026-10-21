@@ -134,7 +134,8 @@ jobs:
         with:
           root-reserve-mb: 8192
           temp-reserve-mb: 1024
-          swap-size-mb: 4096
+          # Linking LTO kernels and their modules can need more than the runner's 16 GB RAM
+          swap-size-mb: 16384
           build-mount-path: '/nix'
           remove-dotnet: 'true'
           remove-android: 'true'
@@ -155,6 +156,11 @@ jobs:
           extra_nix_config: |
             build-dir = /nix/var/nix/builds
             log-lines = 50
+
+      # Out of memory, the whole runner stalls and GitHub drops the job ("The hosted runner
+      # lost communication with the server"). Throttle and swap the Nix builds instead.
+      - name: Cap Nix build memory
+        run: sudo systemctl set-property nix-daemon.service MemoryHigh=12G
 
       - name: Use Cachix cache
         uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17

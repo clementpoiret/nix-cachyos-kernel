@@ -98,7 +98,7 @@ Add the `release` branch of this repo to the inputs section of your `flake.nix`:
 }
 ```
 
-The `release` branch only moves once [GitHub Actions](.github/workflows/auto-update.yml) has built every cached kernel and pushed it to the binary cache.
+The `release` branch only moves once [GitHub Actions](.github/workflows/auto-update.yml) has built every cached kernel and pushed it to the binary cache. Its commits are snapshots of `master` without the `.github/` CI files, which GitHub doesn't let the workflow publish; each commit message names the `master` commit it was taken from.
 
 > If you want the absolute latest version with or without binary cache, use the `master` branch (default branch) instead:
 >

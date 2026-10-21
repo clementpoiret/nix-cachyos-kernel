@@ -12,7 +12,7 @@ body:
 
         Here are some common steps you can try to fix the issue:
 
-        - Use the `release` branch instead of `master` branch. `release` branch contains kernels that are built by my CI and cached.
+        - Use the `release` branch instead of `master` branch. `release` branch only contains kernels that CI has built and pushed to the binary cache. Only some variants are cached, see the README.
         - Use the `nix-cachyos-kernel.overlays.pinned` overlay instead of `default`. The `pinned` overlay uses nixpkgs from this repo.
         - Make sure you are not overriding the `nixpkgs` input of this flake, such as `inputs.nixpkgs.follows = "..."`.
 
@@ -20,7 +20,7 @@ body:
 
         ```nix
         inputs = {
-          nix-cachyos-kernel.url = "github:xddxdd/nix-cachyos-kernel/release";
+          nix-cachyos-kernel.url = "github:clementpoiret/nix-cachyos-kernel/release";
         };
         ```
 
@@ -29,7 +29,7 @@ body:
     attributes:
       label: Please confirm the following before submitting an issue
       options:
-        - label: I am using the `release` branch (`github:xddxdd/nix-cachyos-kernel/release`)
+        - label: I am using the `release` branch (`github:clementpoiret/nix-cachyos-kernel/release`)
           required: true
         - label: I am using `nix-cachyos-kernel.overlays.pinned` (not `overlays.default`)
           required: true

@@ -1,0 +1,1 @@
+obj-m := signing_test.o

@@ -147,6 +147,7 @@ jobs:
         #
         # With the kernel's SIMD-disabled flags, x86_64-v4 compiles the same code as v3 and
         # x86_64-v2 adds almost nothing over generic, so only generic, v3 and zen4 are cached.
+        # Keep in sync with the checks in flake.nix.
         kernel:
           - linux-cachyos-latest
           - linux-cachyos-latest-lto
@@ -234,16 +235,26 @@ jobs:
           nix build --no-link --keep-going \
             "$nvidia.latest.open" "$nvidia.latest.mod" "$nvidia.stable.open" "$nvidia.stable.mod"
 
+      # Modules that copy their .ko instead of using modules_install (like acpi_call did) break
+      # the NixOS build unless helpers.kernelModuleSignOverride signs them. Checks it still does,
+      # with a test module (tests/module-signing). Like ZFS, failures don't block the release.
+      - name: Check module signing
+        id: signing
+        continue-on-error: true
+        run: nix build --no-link --print-build-logs ".#checks.x86_64-linux.module-signing-$KERNEL"
+
       - name: Summary
         if: always()
         env:
           ZFS_OUTCOME: ${{ steps.zfs.outcome }}
           NVIDIA_OUTCOME: ${{ steps.nvidia.outcome }}
+          SIGNING_OUTCOME: ${{ steps.signing.outcome }}
         run: |
           {
             echo "### $KERNEL"
             echo "ZFS module: $ZFS_OUTCOME"
             echo "NVIDIA modules (latest and stable, open and proprietary): $NVIDIA_OUTCOME"
+            echo "Signing of modules installed without modules_install: $SIGNING_OUTCOME"
             echo '```'
             cat "$RUNNER_TEMP/kernel-paths" "$RUNNER_TEMP/zfs-paths" 2>/dev/null | xargs -r nix path-info --size --human-readable
             echo '```'

@@ -79,4 +79,47 @@ rec {
           v
       ) prev
     );
+
+  # nixpkgs' module tree (kmod/aggregator.nix) needs a kmodigest certificate (.ko.cer) next to
+  # every external module. Kbuild's modules_install creates it, but packages that copy their
+  # .ko themselves (acpi_call, zenpower, evdi, ...) don't, which fails the NixOS build.
+  # Sign those in postFixup: stripping would drop a signature added earlier.
+  # Only packages with the kernel as a direct input are changed. The package set's userspace
+  # tools (perf, bcc, system76-scheduler, ...) stay as in nixpkgs, cached on cache.nixos.org.
+  # nixpkgs without kmodigest (26.05 and older) don't need the certificates.
+  kernelModuleSignOverride =
+    kernelPackages_:
+    kernelPackages_.extend (
+      _final: prev:
+      let
+        buildsAgainstKernel =
+          v:
+          lib.elem prev.kernel.drvPath (
+            lib.attrNames (builtins.getContext (builtins.toJSON (v.drvAttrs or { })))
+          );
+      in
+      lib.mapAttrs (
+        n: v:
+        if
+          pkgs.buildPackages ? kmodigest
+          && n != "kernel"
+          && lib.isDerivation v
+          && ((v.overrideAttrs or null) != null)
+          && buildsAgainstKernel v
+        then
+          v.overrideAttrs (old: {
+            postFixup = (if (old.postFixup or null) == null then "" else old.postFixup) + ''
+              for output in $(getAllOutputNames); do
+                if [ -d "''${!output}/lib/modules" ]; then
+                  find "''${!output}/lib/modules" -name '*.ko' -print0 | while IFS= read -r -d "" module; do
+                    [ -e "$module.cer" ] || ${lib.getExe pkgs.buildPackages.kmodigest} "$module"
+                  done
+                fi
+              done
+            '';
+          })
+        else
+          v
+      ) prev
+    );
 }

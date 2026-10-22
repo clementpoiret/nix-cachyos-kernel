@@ -7,7 +7,7 @@
 }:
 let
   helpers = callPackage ../helpers.nix { };
-  inherit (helpers) kernelModuleLLVMOverride;
+  inherit (helpers) kernelModuleLLVMOverride kernelModuleSignOverride;
 
   kernels = lib.filterAttrs (_: lib.isDerivation) (callPackage ./. { inherit inputs; });
 in
@@ -52,5 +52,5 @@ lib.mapAttrs' (
       )
     );
   in
-  lib.nameValuePair "linuxPackages-${lib.removePrefix "linux-" n}" packages
+  lib.nameValuePair "linuxPackages-${lib.removePrefix "linux-" n}" (kernelModuleSignOverride packages)
 ) kernels

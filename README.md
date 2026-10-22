@@ -201,7 +201,7 @@ The cache lives on a free Cachix plan, so only these packages are cached, from t
 - `linux-cachyos-latest-lto-zen4`, for AMD Zen 4 and Zen 5
 - their ZFS modules (`zfs_cachyos` in the matching `linuxPackages-cachyos-*`)
 
-Other variants are built locally. If you were going to use an `-x86_64-v2` or `-x86_64-v4` kernel, use the cached generic or `-x86_64-v3` one instead: the kernel is compiled with SIMD disabled, so x86-64-v4 (which only adds AVX-512) produces the same code as x86-64-v3, and x86-64-v2 adds almost nothing over generic (the kernel already switches to POPCNT at boot when the CPU has it). Out-of-tree modules such as NVIDIA or VirtualBox are always built locally, against the cached kernel's `dev` output. CI checks that nixpkgs' `latest` and `stable` NVIDIA drivers, open and proprietary modules, build against every cached kernel.
+Other variants are built locally. If you were going to use an `-x86_64-v2` or `-x86_64-v4` kernel, use the cached generic or `-x86_64-v3` one instead: the kernel is compiled with SIMD disabled, so x86-64-v4 (which only adds AVX-512) produces the same code as x86-64-v3, and x86-64-v2 adds almost nothing over generic (the kernel already switches to POPCNT at boot when the CPU has it). Out-of-tree modules such as NVIDIA or VirtualBox are always built locally, against the cached kernel's `dev` output. CI checks that nixpkgs' `latest` and `stable` NVIDIA drivers, open and proprietary modules, build against every cached kernel. It also checks that modules installing their `.ko` without Kbuild's `modules_install` (`acpi_call` and others in nixpkgs) get the signature and certificate NixOS needs, see `kernelModuleSignOverride` in [helpers.nix](helpers.nix).
 
 **Important:** As with all binary caches, after adding binary cache to your NixOS configuration, please apply your settings once before enabling CachyOS kernel, so that the binary cache settings can take effect.
 
@@ -382,6 +382,11 @@ Additional arguments are passed through to `buildLinux` from nixpkgs. See [nixpk
 ### Example Usage
 
 ```nix
+let
+  # helpers.nix provides a few utilities for building kernel package sets.
+  # I haven't figured out a clean way to expose it in flakes.
+  helpers = pkgs.callPackage "${inputs.nix-cachyos-kernel.outPath}/helpers.nix" {};
+in
 {
   kernel = pkgs.cachyosKernels.linux-cachyos-latest.override {
     pname = "linux-cachyos-with-custom-source";
@@ -401,16 +406,14 @@ Additional arguments are passed through to `buildLinux` from nixpkgs. See [nixpk
     # Additional args are available. See kernel-cachyos/mkCachyKernel.nix
   };
 
-  # For non-LTO kernels
-  kernelPackages = pkgs.linuxKernel.packagesFor kernel;
+  # For non-LTO kernels. helpers.kernelModuleSignOverride adds the certificates (.ko.cer)
+  # NixOS needs to out-of-tree modules that install their .ko themselves, such as acpi_call.
+  kernelPackages = helpers.kernelModuleSignOverride (pkgs.linuxKernel.packagesFor kernel);
 
-
-  # For LTO kernels, helpers.kernelModuleLLVMOverride fixes compilation for some
+  # For LTO kernels, helpers.kernelModuleLLVMOverride also fixes compilation for some
   # out-of-tree modules in nixpkgs.
-  kernelPackagesWithLTOFix = let
-    # helpers.nix provides a few utilities for building kernel with LTO.
-    # I haven't figured out a clean way to expose it in flakes.
-    helpers = pkgs.callPackage "${inputs.nix-cachyos-kernel.outPath}/helpers.nix" {};
-  in helpers.kernelModuleLLVMOverride (pkgs.linuxKernel.packagesFor kernel);
+  kernelPackagesWithLTOFix = helpers.kernelModuleSignOverride (
+    helpers.kernelModuleLLVMOverride (pkgs.linuxKernel.packagesFor kernel)
+  );
 }
 ```

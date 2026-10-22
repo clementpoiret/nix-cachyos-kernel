@@ -41,6 +41,28 @@
             # Packages only contain linux-cachyos-* due to Flake schema requirements
             packages = lib.filterAttrs (_: lib.isDerivation) legacyPackages;
 
+            # For the kernels cached by CI, which builds these checks (.github/workflows/auto-update.yml).
+            # They download or build those kernels: use nix flake check --no-build to only evaluate.
+            checks = lib.listToAttrs (
+              map
+                (
+                  kernel:
+                  lib.nameValuePair "module-signing-${kernel}" (
+                    pkgs.callPackage ./tests/module-signing {
+                      kernelPackages = legacyPackages."linuxPackages-${lib.removePrefix "linux-" kernel}";
+                    }
+                  )
+                )
+                [
+                  "linux-cachyos-latest"
+                  "linux-cachyos-latest-lto"
+                  "linux-cachyos-lts"
+                  "linux-cachyos-bore"
+                  "linux-cachyos-latest-lto-x86_64-v3"
+                  "linux-cachyos-latest-lto-zen4"
+                ]
+            );
+
             apps =
               let
                 mkApp = name: script: {

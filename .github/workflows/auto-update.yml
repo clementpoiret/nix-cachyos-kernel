@@ -143,7 +143,8 @@ jobs:
       matrix:
         # Each kernel takes roughly 350-400 MB of the Cachix cache (out, modules and dev
         # outputs), and older builds are evicted once the 5 GB free tier is full. Keep a
-        # full round under ~2.5 GB so the previous one stays available while this one builds.
+        # full round around 2.5 GB (7 kernels) so the previous one stays mostly available
+        # while this one builds.
         #
         # With the kernel's SIMD-disabled flags, x86_64-v4 compiles the same code as v3 and
         # x86_64-v2 adds almost nothing over generic, so only generic, v3 and zen4 are cached.
@@ -155,6 +156,8 @@ jobs:
           - linux-cachyos-bore
           - linux-cachyos-latest-lto-x86_64-v3
           - linux-cachyos-latest-lto-zen4
+          # GCC: with Clang, the GCC plugins of its config are unavailable (no latent entropy)
+          - linux-cachyos-hardened
     env:
       KERNEL: ${{ matrix.kernel }}
     steps:

@@ -60,6 +60,7 @@
                   "linux-cachyos-bore"
                   "linux-cachyos-latest-lto-x86_64-v3"
                   "linux-cachyos-latest-lto-zen4"
+                  "linux-cachyos-hardened"
                 ]
             );
 

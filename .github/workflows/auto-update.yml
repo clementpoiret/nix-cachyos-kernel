@@ -9,8 +9,8 @@ on:
   schedule:
     # Check for new CachyOS releases daily. A nixpkgs update rebuilds every kernel when it
     # changes their toolchain (6 of 33 daily updates in Sep-Oct 2026), so flake inputs are
-    # updated along with a new linux-cachyos release, whose kernels rebuild anyway, or once
-    # the locked nixpkgs is a week old. See the commit job.
+    # updated along with new linux-cachyos sources (a release, re-release or config change),
+    # whose kernels rebuild anyway, or once the locked nixpkgs is a week old. See the commit job.
     - cron: '37 17 * * *'
 
 # Each job requests the permissions it needs
@@ -86,12 +86,15 @@ jobs:
         env:
           FORCE_UPDATE: ${{ inputs.update-flake-inputs }}
         run: |
-          version() { python3 -I -c 'import json, sys; print(json.load(sys.stdin)["linux-cachyos"]["version"])'; }
-          old=$(git show HEAD:kernel-cachyos/version.json | version)
-          new=$(version < kernel-cachyos/version.json)
+          # The linux-cachyos kernels rebuild when their source changes (a new version or a
+          # re-release of the same one) or their config does, so update flake inputs with them.
+          sources() { python3 -I -c 'import json, sys; v = json.load(sys.stdin)["linux-cachyos"]; print(v["url"].rsplit("/", 1)[1], v["hash"], v["configHash"])'; }
+          old=$(git show HEAD:kernel-cachyos/version.json | sources)
+          new=$(sources < kernel-cachyos/version.json)
           locked=$(python3 -I -c 'import json; print(json.load(open("flake.lock"))["nodes"]["nixpkgs"]["locked"]["lastModified"])')
           age=$(( ($(date +%s) - locked) / 86400 ))
-          echo "linux-cachyos: $old -> $new, locked nixpkgs is $age days old"
+          echo "linux-cachyos source and config: $old -> $new"
+          echo "locked nixpkgs is $age days old"
           if [ "$FORCE_UPDATE" = true ] || [ "$old" != "$new" ] || [ "$age" -ge 7 ]; then
             echo "update=true" >> "$GITHUB_OUTPUT"
           fi
@@ -143,7 +146,8 @@ jobs:
       matrix:
         # Each kernel takes roughly 350-400 MB of the Cachix cache (out, modules and dev
         # outputs), and older builds are evicted once the 5 GB free tier is full. Keep a
-        # full round under ~2.5 GB so the previous one stays available while this one builds.
+        # full round around 2.5 GB (7 kernels) so the previous one stays mostly available
+        # while this one builds.
         #
         # With the kernel's SIMD-disabled flags, x86_64-v4 compiles the same code as v3 and
         # x86_64-v2 adds almost nothing over generic, so only generic, v3 and zen4 are cached.
@@ -155,6 +159,8 @@ jobs:
           - linux-cachyos-bore
           - linux-cachyos-latest-lto-x86_64-v3
           - linux-cachyos-latest-lto-zen4
+          # GCC: with Clang, the GCC plugins of its config are unavailable (no latent entropy)
+          - linux-cachyos-hardened
     env:
       KERNEL: ${{ matrix.kernel }}
     steps:

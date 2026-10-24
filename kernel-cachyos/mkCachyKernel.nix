@@ -132,7 +132,7 @@ lib.makeOverridable (
         cachySettings.common
         // (cachySettings.lto."${lto}")
         // (lib.optionalAttrs (cpusched != null) cachySettings.cpusched."${cpusched}")
-        // (lib.optionalAttrs kcfi cachySettings.kcfi)
+        // (lib.optionalAttrs kcfi (cachySettings.kcfi version))
         // (lib.optionalAttrs (hzTicks != null) cachySettings.hzTicks."${hzTicks}")
         // (lib.optionalAttrs performanceGovernor cachySettings.performanceGovernor)
         // (lib.optionalAttrs (tickrate != null) cachySettings.tickrate."${tickrate}")
@@ -152,6 +152,15 @@ lib.makeOverridable (
           # from what I can see, this still hasn't been merged into 7.0, so may
           # be a bit
           RUST = lib.kernel.no;
+
+          # nixpkgs' common config reverts these choices of CachyOS' hardened config
+          BPF_JIT_ALWAYS_ON = lib.kernel.yes;
+          CHECKPOINT_RESTORE = lib.kernel.no;
+          USERFAULTFD = lib.kernel.no;
+          VFIO_NOIOMMU = lib.kernel.no;
+          # CachyOS disables KEXEC, nixpkgs enables kexec_file_load. KEXEC_HANDOVER selects it.
+          KEXEC_FILE = lib.kernel.no;
+          KEXEC_HANDOVER = lib.kernel.no;
         })
       ))
 

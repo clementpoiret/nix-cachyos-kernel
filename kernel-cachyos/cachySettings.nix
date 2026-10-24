@@ -24,11 +24,22 @@ with lib.kernel;
     rt-bore = rt // bore;
   };
 
-  kcfi = {
-    ARCH_SUPPORTS_CFI_CLANG = yes;
-    CFI_CLANG = yes;
-    CFI_AUTO_DEFAULT = yes;
-  };
+  # Needs Clang (lto != "none"). CFI_CLANG was renamed to CFI in 6.18, and only remains as a
+  # transitional option that isn't prompted for.
+  kcfi =
+    version:
+    {
+      CFI_AUTO_DEFAULT = yes;
+    }
+    // (
+      if lib.versionAtLeast version "6.18" then
+        { CFI = yes; }
+      else
+        {
+          ARCH_SUPPORTS_CFI_CLANG = yes;
+          CFI_CLANG = yes;
+        }
+    );
 
   hzTicks = {
     "300" = {

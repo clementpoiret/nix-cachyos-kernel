@@ -72,7 +72,7 @@ This repo provides the following kernel variants, consistent with the [upstream 
 
 Only some of them are in the binary cache, see [Binary cache](#binary-cache).
 
-The kernel versions are automatically kept in sync with upstream CachyOS releases via a daily GitHub Action (see [update.py](update.py)), so once CachyOS updates their kernels, this repo will automatically catch up. Flake inputs (nixpkgs) are updated along with each new `linux-cachyos` release, or after a week without one.
+The kernel versions are automatically kept in sync with upstream CachyOS releases via a daily GitHub Action (see [update.py](update.py)), so once CachyOS updates their kernels, this repo will automatically catch up. Flake inputs (nixpkgs) are updated whenever the `linux-cachyos` kernels rebuild anyway (a new release, a re-release of the same version, or a config change), or after a week without one.
 
 Use `nix flake show github:clementpoiret/nix-cachyos-kernel/release` to see the current effective versions.
 
@@ -199,6 +199,7 @@ The cache lives on a free Cachix plan, so only these packages are cached, from t
 - `linux-cachyos-latest`, `linux-cachyos-latest-lto`, `linux-cachyos-lts` and `linux-cachyos-bore`, for any x86-64 CPU
 - `linux-cachyos-latest-lto-x86_64-v3`, for x86-64-v3 CPUs (Intel Haswell and later, all AMD Zen)
 - `linux-cachyos-latest-lto-zen4`, for AMD Zen 4 and Zen 5
+- `linux-cachyos-hardened`, with CachyOS's hardened patch (based on [linux-hardened](https://github.com/anthraxx/linux-hardened)), for any x86-64 CPU. It can be on an older kernel series than `linux-cachyos-latest`. It is built with GCC: with Clang (`-lto`), the GCC plugins of its config are unavailable and latent entropy is lost
 - their ZFS modules (`zfs_cachyos` in the matching `linuxPackages-cachyos-*`)
 
 Other variants are built locally. If you were going to use an `-x86_64-v2` or `-x86_64-v4` kernel, use the cached generic or `-x86_64-v3` one instead: the kernel is compiled with SIMD disabled, so x86-64-v4 (which only adds AVX-512) produces the same code as x86-64-v3, and x86-64-v2 adds almost nothing over generic (the kernel already switches to POPCNT at boot when the CPU has it). Out-of-tree modules such as NVIDIA or VirtualBox are always built locally, against the cached kernel's `dev` output. CI checks that nixpkgs' `latest` and `stable` NVIDIA drivers, open and proprietary modules, build against every cached kernel. It also checks that modules installing their `.ko` without Kbuild's `modules_install` (`acpi_call` and others in nixpkgs) get the signature and certificate NixOS needs, see `kernelModuleSignOverride` in [helpers.nix](helpers.nix).
@@ -348,7 +349,7 @@ The following arguments can be passed to `mkCachyKernel`:
 **CachyOS Fine Tuning Settings:**
 
 - **`cpusched`**: CPU scheduler. Options: `"eevdf"` (default), `"bore"`, `"bmq"`, `"rt"`, `"rt-bore"` or `null` to disable.
-- **`kcfi`**: Enable Kernel Control Flow Integrity. Default: `false`.
+- **`kcfi`**: Enable Kernel Control Flow Integrity. Requires Clang (`lto` other than `"none"`). Default: `false`.
 - **`hzTicks`**: Timer frequency. Options: `"1000"` (default), `"100"`, `"250"`, `"300"`, `"500"`, `"600"`, `"750"`, or `null` to disable.
 - **`performanceGovernor`**: Enable performance governor. Default: `false`.
 - **`tickrate`**: Tick rate. Options: `"full"` (default), `"periodic"`, `"idle"`, or `null` to disable.
@@ -359,7 +360,7 @@ The following arguments can be passed to `mkCachyKernel`:
 
 **CachyOS Additional Patch Settings:**
 
-- **`hardened`**: Apply hardened security patches. Default: `false`.
+- **`hardened`**: Apply hardened security patches. Also turns back off what nixpkgs' common kernel config turns on against CachyOS's hardened config (`USERFAULTFD`, `KEXEC_FILE`, `CHECKPOINT_RESTORE`, `VFIO_NOIOMMU`), and back on `BPF_JIT_ALWAYS_ON`. Default: `false`.
 - **`rt`**: Apply real-time patches. Default: `false`.
 - **`acpiCall`**: Apply ACPI call patches. Default: `false`.
 - **`handheld`**: Apply handheld-specific patches. Default: `false`.

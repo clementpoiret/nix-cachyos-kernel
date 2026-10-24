@@ -5,13 +5,14 @@ pinned revisions, versions and hashes may change, and every source must keep poi
 expected CachyOS location. flake.lock is not taken from that job: the commit job updates it.
 
 Usage: python3 -I validate_update.py <artifact-dir>
-Prints a summary of the changes, one per line.
+Prints a summary of the changes, one per line with the variants it applies to.
 """
 
 import json
 import re
 import stat
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
@@ -71,6 +72,14 @@ def read_json(root: Path, rel: str):
         fail(f"{rel}: {error}")
 
 
+def summarize(changes: dict[str, list[str]]) -> list[str]:
+    return [f"{change}: {', '.join(variants)}" for change, variants in changes.items()]
+
+
+def release(v) -> str:
+    return v["url"].rsplit("/", 1)[1].removesuffix(".tar.gz")
+
+
 def check_kernels(new, old) -> list[str]:
     if not isinstance(new, dict):
         fail(f"{KERNEL_FILE}: expected an object")
@@ -78,7 +87,8 @@ def check_kernels(new, old) -> list[str]:
     if removed:
         fail(f"{KERNEL_FILE}: variants disappeared upstream: {removed}, update kernel-cachyos/ by hand")
 
-    changes = []
+    # Source, config and patch changes, including re-releases of the same version
+    changes = defaultdict(list)
     for variant, v in sorted(new.items()):
         name = f"{KERNEL_FILE}: {variant}"
         check(name, variant, VARIANT)
@@ -107,10 +117,23 @@ def check_kernels(new, old) -> list[str]:
         for key in ("hash", "configHash", "patchHash"):
             check(f"{name}.{key}", v[key], SRI_SHA256)
 
-        previous = old.get(variant, {}).get("version")
-        if previous != v["version"]:
-            changes.append(f"{variant}: {previous} -> {v['version']}")
-    return changes
+        o = old.get(variant)
+        if o is None:
+            changes[f"new variant, {release(v)}"].append(variant)
+            continue
+        if v["url"] != o["url"]:
+            rerelease = " (re-release)" if v["version"] == o["version"] else ""
+            changes[f"source {release(o)} -> {release(v)}{rerelease}"].append(variant)
+        elif v["hash"] != o["hash"]:
+            changes[f"source {release(v)} replaced upstream with different content"].append(variant)
+        if v["configHash"] != o["configHash"]:
+            config_rev = v["configUrl"].split("/")[5]
+            changes[f"config changed (CachyOS/linux-cachyos {config_rev[:12]})"].append(variant)
+        if v["patchVersion"] != o["patchVersion"]:
+            changes[f"patches {o['patchVersion']} -> {v['patchVersion']} ({v['patchRev'][:12]})"].append(variant)
+        elif v["patchHash"] != o["patchHash"]:
+            changes[f"{v['patchVersion']} patches {o['patchRev'][:12]} -> {v['patchRev'][:12]}"].append(variant)
+    return summarize(changes)
 
 
 def check_zfs(new, old, kernels) -> list[str]:
@@ -125,9 +148,13 @@ def check_zfs(new, old, kernels) -> list[str]:
         check(f"{name}.version", v["version"], ZFS_VERSION)
         check(f"{name}.hash", v["hash"], SRI_SHA256)
 
-    versions = sorted({v["version"] for v in new.values()})
-    previous = sorted({v.get("version") for v in old.values()})
-    return [f"zfs: {', '.join(previous)} -> {', '.join(versions)}"] if versions != previous else []
+    changes = defaultdict(list)
+    for variant, v in sorted(new.items()):
+        o = old.get(variant)
+        if o is None or v["commit"] != o["commit"]:
+            previous = f"{o['version']} ({o['commit'][:12]}) -> " if o else ""
+            changes[f"zfs {previous}{v['version']} ({v['commit'][:12]})"].append(variant)
+    return summarize(changes)
 
 
 if __name__ == "__main__":
@@ -142,6 +169,8 @@ if __name__ == "__main__":
 
     changes = check_kernels(files[KERNEL_FILE][1], current[KERNEL_FILE])
     changes += check_zfs(files[ZFS_FILE][1], current[ZFS_FILE], files[KERNEL_FILE][1])
+    if not changes and any(parsed != current[rel] for rel, (_, parsed) in files.items()):
+        changes = ["pinned CachyOS revisions moved, no source changed"]
 
     for rel, (data, _) in files.items():
         (REPO / rel).write_bytes(data)

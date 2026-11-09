@@ -144,6 +144,11 @@ lib.makeOverridable (
         // (lib.optionalAttrs (autofdo != false) {
           AUTOFDO_CLANG = lib.kernel.yes;
         })
+        // (lib.optionalAttrs (lto != "none") {
+          # Linux 7.3.3 allows Rust with LTO and BTF, which kernels before it refused, but then
+          # BTF generation fails for Rust-only modules (rnull_mod.ko). Keep Rust off with LTO.
+          RUST = lib.kernel.no;
+        })
         // (lib.optionalAttrs (hardened != false) {
           # required because hardened kernels use the latent entropy gcc plugin
           # which the rust bindgen currently doesn't support. They're waiting on
